@@ -21,8 +21,8 @@ var roundRobin = flag.Bool("r", false, "use round-robin scheduling")
 
 // Simulation of some work: just sleep for a while and report how long.
 func op() int {
-	n := rand.Int63n(1e9)
-	time.Sleep(nWorker * n)
+	n := rand.Int63n(int64(time.Second))
+	time.Sleep(time.Duration(nWorker * n))
 	return int(n)
 }
 
@@ -34,7 +34,7 @@ type Request struct {
 func requester(work chan Request) {
 	c := make(chan int)
 	for {
-		time.Sleep(rand.Int63n(nWorker * 2e9))
+		time.Sleep(time.Duration(rand.Int63n(int64(nWorker * 2 * time.Second))))
 		work <- Request{op, c}
 		<-c
 	}
@@ -62,27 +62,24 @@ func (p Pool) Less(i, j int) bool {
 	return p[i].pending < p[j].pending
 }
 
-func (p *Pool) Swap(i, j int) {
-	a := *p
-	a[i], a[j] = a[j], a[i]
-	a[i].i = i
-	a[j].i = j
+func (p Pool) Swap(i, j int) {
+	p[i], p[j] = p[j], p[i]
+	p[i].i = i
+	p[j].i = j
 }
 
 func (p *Pool) Push(x interface{}) {
-	a := *p
-	n := len(a)
-	a = a[0 : n+1]
 	w := x.(*Worker)
-	a[n] = w
-	w.i = n
-	*p = a
+	w.i = len(*p)
+	// fmt.Printf("w = %+v\n", w)
+	*p = append(*p, w)
 }
 
 func (p *Pool) Pop() interface{} {
 	a := *p
-	*p = a[0 : len(a)-1]
-	w := a[len(a)-1]
+	n := len(a)
+	*p = a[0 : n-1]
+	w := a[n-1]
 	w.i = -1 // for safety
 	return w
 }
@@ -144,7 +141,7 @@ func (b *Balancer) dispatch(req Request) {
 	w := heap.Pop(&b.pool).(*Worker)
 	w.requests <- req
 	w.pending++
-	//	fmt.Printf("started %p; now %d\n", w, w.pending)
+	// fmt.Printf("started %p; now %d\n", w, w.pending)
 	heap.Push(&b.pool, w)
 }
 
@@ -155,9 +152,10 @@ func (b *Balancer) completed(w *Worker) {
 	}
 
 	w.pending--
-	//	fmt.Printf("finished %p; now %d\n", w, w.pending)
-	heap.Remove(&b.pool, w.i)
-	heap.Push(&b.pool, w)
+	// fmt.Printf("finished %p; now %d\n", w, w.pending)
+	// heap.Remove(&b.pool, w.i)
+	// heap.Push(&b.pool, w)
+	heap.Fix(&b.pool, w.i)
 }
 
 func main() {
